@@ -43,12 +43,13 @@
                 <div class="overlay-box">
                   <v-range-slider
                     strict
+                    class="custom-range-slider"
                     step="1"
                     thumb-label="always"
                     v-model="audioRange"
                     :disabled="!audioIsLoaded"
                     :label="formatTime(audioCurrentTime)"
-                    :max="audioRange[1]"
+                    :max="audioMax"
                     @update:modelValue="moveRangeSlider"
                   >
                     <template v-slot:thumb-label="{ modelValue }">
@@ -60,13 +61,21 @@
                   <v-slider
                     class="opacity"
                     step="1"
-                    thumb-size="10"
-                    color="orange"
+                    thumb-size="12"
+                    color="primary"
                     v-model="audioCurrentTime"
                     :disabled="!audioIsLoaded"
                     :label="formatTime(audioCurrentTime)"
-                    :max="audioRange[1]"
+                    :max="audioMax"
+                    @update:modelValue="moveSlider"
                   ></v-slider>
+                </div>
+              </v-col>
+            </v-row>
+            <v-row justify="center">
+              <v-col cols="auto">
+                <div class="text-h6 text-primary font-weight-bold">
+                  {{ (audioRange[1] - audioRange[0]) / 1000 }}
                 </div>
               </v-col>
             </v-row>
@@ -75,7 +84,7 @@
                 <v-btn icon :disabled="!audioIsLoaded" @click="audioToggle">
                   <v-icon
                     size="large"
-                    :icon="isPlaying ? 'mdi-pause' : 'mdi-play'"
+                    :icon="audioIsPlaying ? 'mdi-pause' : 'mdi-play'"
                   ></v-icon>
                 </v-btn>
               </v-col>
@@ -107,7 +116,8 @@
           variant="outlined"
           elevation="2"
           color="primary"
-          @click="submit"
+          :loading="isLoading"
+          @click="generate"
           >Generate</v-btn
         >
       </v-col>
@@ -116,58 +126,50 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed, watch } from "vue";
+import { ref, onMounted, onBeforeUnmount } from "vue";
+
+let image = ref(null);
+let audio = ref(null);
+
+let audioRange = ref([0, 0]);
+let audioCurrentTime = ref(0);
+let audioMax = ref(0);
+let audioIsPlaying = ref(false);
+let audioIsLoaded = ref(false);
+let isLoading = ref(false);
+let oldResult = ref("");
 
 const audioPlayer = ref();
 const form = ref();
-let image = ref(null);
-let audio = ref(null);
-let audioRange = ref([0, 0]);
-let audioCurrentTime = ref(0);
-let isPlaying = ref(false);
-let audioIsLoaded = ref(false);
-let imageRules = ref([
+const emit = defineEmits(["sendPath"]);
+const imageRules = ref([
   (value) => {
-    if (value.length > 0) return true;
-    return "Image is required";
+    return value.length > 0 ? true : "Image is required";
   },
 ]);
-let audioRules = ref([
+const audioRules = ref([
   (value) => {
-    if (value.length > 0) return true;
-    return "Audio is required";
+    return value.length > 0 ? true : "Audio is required";
   },
   (value) => {
-    if (audioRange.value[1] - audioRange.value[0] <= 30) return true;
-    return "Audio must be within 30 seconds";
+    return audioRange.value[1] - audioRange.value[0] <= 30 * 1000
+      ? true
+      : "Audio must be within 30 seconds";
   },
 ]);
 
-async function submit() {
-  const { valid } = await form.value.validate();
-  console.log(valid);
-}
+function formatTime(ms) {
+  let totalSeconds = Math.floor(ms / 1000);
 
-onMounted(() => {
-  audioPlayer.value.addEventListener("pause", function () {
-    if (audioIsLoaded) {
-      isPlaying.value = false;
-    }
-  });
+  let minutes = Math.floor(totalSeconds / 60);
+  let seconds = totalSeconds % 60;
+  let milliseconds = ms % 1000;
 
-  audioPlayer.value.addEventListener("play", function () {
-    if (audioIsLoaded) {
-      isPlaying.value = true;
-    }
-  });
+  let formattedMinutes = minutes.toString().padStart(2, "0");
+  let formattedSeconds = seconds.toString().padStart(2, "0");
+  let formattedMilliseconds = milliseconds.toString().padStart(3, "0");
 
-  document.addEventListener("keydown", handleKeyPress);
-});
-
-function formatTime(seconds) {
-  const minutes = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+  return `${formattedMinutes}:${formattedSeconds}.${formattedMilliseconds}`;
 }
 
 function handleKeyPress(event) {
@@ -177,14 +179,8 @@ function handleKeyPress(event) {
 }
 
 function onChangeImageFile(event) {
-  window.ipcRenderer.invoke("message", "message from vue").then((result) => {
-    console.log("result:", result);
-  });
-
   const file = event.target.files[0];
-  if (file && file.type.startsWith("image/")) {
-    console.log(image);
-  } else {
+  if (!(file && file.type.startsWith("image/"))) {
     alert("Please upload a valid image file.");
   }
 
@@ -192,17 +188,15 @@ function onChangeImageFile(event) {
 }
 
 function onChangeAudioFile(event) {
-  window.ipcRenderer.invoke("message", "message from vue").then((result) => {
-    console.log("result:", result);
-  });
-
   const file = event.target.files[0];
   if (file && file.type === "audio/mpeg") {
     const objectURL = URL.createObjectURL(file);
     audioIsLoaded.value = true;
     audioPlayer.value.src = objectURL;
     audioPlayer.value.onloadedmetadata = () => {
-      audioRange.value = [0, Math.floor(audioPlayer.value.duration)];
+      const duration = Math.floor(audioPlayer.value.duration * 1000);
+      audioRange.value = [0, duration];
+      audioMax.value = duration;
     };
   } else {
     alert("Please upload a valid MP3 file.");
@@ -214,11 +208,11 @@ function onChangeAudioFile(event) {
 
 function onTimeUpdate(event) {
   if (audioIsLoaded) {
-    if (audioPlayer.value.currentTime >= audioRange.value[1]) {
+    if (audioPlayer.value.currentTime * 1000 >= audioRange.value[1]) {
       audioStop(event);
     }
 
-    audioCurrentTime.value = Math.floor(audioPlayer.value.currentTime);
+    audioCurrentTime.value = Math.floor(audioPlayer.value.currentTime * 1000);
   }
 }
 
@@ -228,46 +222,99 @@ function moveRangeSlider(event) {
   }
 }
 
+function moveSlider(event) {
+  if (audioIsLoaded) {
+    audioIsPlaying.value = false;
+    audioPlayer.value.pause();
+    audioPlayer.value.currentTime = audioCurrentTime.value / 1000;
+  }
+}
+
 function audioToggle(event) {
   if (audioIsLoaded) {
     if (
-      !isPlaying.value &&
+      !audioIsPlaying.value &&
       audioPlayer.value.currentTime < audioRange.value[1]
     ) {
       audioPlayer.value.play();
     } else {
       audioPlayer.value.pause();
     }
-    isPlaying.value = !isPlaying.value;
+    audioIsPlaying.value = !audioIsPlaying.value;
   }
 }
 
 function audioStop(event) {
   if (audioIsLoaded) {
+    audioIsPlaying.value = false;
     audioPlayer.value.pause();
-    isPlaying.value = false;
-    audioPlayer.value.currentTime = audioRange.value[0];
+    audioPlayer.value.currentTime = audioRange.value[0] / 1000;
     audioCurrentTime.value = audioRange.value[0];
   }
 }
 
 function audioInitialize(event) {
-  audioPlayer.value.pause();
-  isPlaying.value = false;
+  audioIsPlaying.value = false;
   audioIsLoaded.value = false;
+  audioPlayer.value.pause();
   audioPlayer.value.currentTime = 0;
   audioCurrentTime.value = 0;
   audioRange.value = [0, 0];
+}
+
+onMounted(() => {
+  audioPlayer.value.addEventListener("pause", function () {
+    if (audioIsLoaded) {
+      audioIsPlaying.value = false;
+    }
+  });
+
+  audioPlayer.value.addEventListener("play", function () {
+    if (audioIsLoaded) {
+      audioIsPlaying.value = true;
+    }
+  });
+
+  document.addEventListener("keydown", handleKeyPress);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener("keydown", handleKeyPress);
+});
+
+async function generate() {
+  const { valid } = await form.value.validate();
+
+  if (valid) {
+    isLoading.value = true;
+
+    window.ipcRenderer
+      .invoke(
+        "media-process",
+        image.value.path,
+        audio.value.path,
+        audioRange.value[0] / 1000,
+        audioRange.value[1] / 1000,
+        oldResult.value,
+      )
+      .then((result) => {
+        oldResult.value = result;
+        emit("sendPath", result);
+      })
+      .finally(() => {
+        isLoading.value = false;
+      });
+  }
 }
 </script>
 
 <style>
 .position-relative {
   position: relative;
-  margin-right: 15px;
-  margin-left: 15px;
+  margin-right: 40px;
+  margin-left: 20px;
   margin-top: 50px;
-  margin-bottom: 30px;
+  margin-bottom: 10px;
 }
 .overlay-box {
   position: absolute;

@@ -7,11 +7,11 @@
     <v-main>
       <v-container fluid>
         <v-row>
-          <v-col cols="6">
-            <Form />
+          <v-col cols="8">
+            <Form @sendPath="onPathSend" />
           </v-col>
-          <v-col cols="6">
-            <v-sheet class="pa-2"> .v-col-6 </v-sheet>
+          <v-col cols="4">
+            <VideoPlayer :src="videoPath" @removePath="onPathRemove" />
           </v-col>
         </v-row>
       </v-container>
@@ -20,5 +20,18 @@
 </template>
 
 <script setup>
+import { ref } from "vue";
+
 import Form from "./components/Form.vue";
+import VideoPlayer from "./components/VideoPlayer.vue";
+
+let videoPath = ref("");
+
+function onPathSend(path) {
+  videoPath.value = path;
+}
+
+function onPathRemove() {
+  videoPath.value = "";
+}
 </script>
