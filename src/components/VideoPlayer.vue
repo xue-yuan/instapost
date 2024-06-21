@@ -10,9 +10,15 @@
               controls
               style="width: 100%"
               ref="video"
-              v-if="props.src && showVideo"
-              :src="props.src"
+              v-if="props.videoPath"
+              :src="props.videoPath"
             ></video>
+            <v-textarea
+              clearable
+              label="✏️ Caption"
+              v-model="caption"
+              :readonly="props.videoPath && !isLoading ? false : true"
+            ></v-textarea>
           </div>
         </v-card-item>
         <v-card-actions class="mb-3">
@@ -20,7 +26,7 @@
             <v-col cols="auto">
               <v-btn
                 variant="tonal"
-                :disabled="props.src ? false : true"
+                :disabled="props.videoPath && !isLoading ? false : true"
                 @click="unloadVideo"
               >
                 Close
@@ -29,17 +35,22 @@
             <v-col cols="auto">
               <v-btn
                 variant="tonal"
-                :disabled="props.src ? false : true"
-                @click="saveFile"
+                :disabled="props.videoPath && !isLoading ? false : true"
+                @click="saveVideo"
               >
-                <template v-if="!isSaved"> Save </template>
+                <template v-if="!isSaved">Save</template>
                 <template v-else>
                   <v-icon icon="mdi-check"></v-icon>
                 </template>
               </v-btn>
             </v-col>
             <v-col cols="auto">
-              <v-btn variant="outlined" :disabled="props.src ? false : true">
+              <v-btn
+                variant="outlined"
+                :disabled="props.videoPath ? false : true"
+                :loading="isLoading"
+                @click="uploadVideo"
+              >
                 Upload
               </v-btn>
             </v-col>
@@ -47,36 +58,57 @@
         </v-card-actions>
       </v-card>
     </v-col>
-    <v-col cols="12"> </v-col>
   </v-row>
 </template>
 
 <script setup>
-import { ref, watch } from "vue";
+import { ref } from "vue";
 
-import Snackbar from "./Snackbar.vue";
-
-const props = defineProps(["src"]);
+const props = defineProps(["videoPath", "coverPath"]);
 const emit = defineEmits(["removePath"]);
 const video = ref(null);
 
-const showVideo = ref(true);
-
+let caption = ref("");
 let isSaved = ref(false);
-
-// let snackbarColor = ref("");
-// let snackbarText = ref("");
-// let snackbarShow = ref(false);
+let isLoading = ref(false);
 
 function unloadVideo(event) {
-  window.ipcRenderer.invoke("remove-file", props.src).then((result) => {
-    video.value.pause();
-    video.value.load();
-    emit("removePath");
-  });
+  window.ipcRenderer
+    .invoke("remove-file", props.videoPath)
+    .then((res) => {
+      video.value.pause();
+      video.value.load();
+      emit("removePath");
+      emit("showSnackbar", "success", "Closed!");
+    })
+    .catch((err) => {
+      emit("showSnackbar", "error", err);
+    });
 }
 
-function saveFile(event) {
-  window.ipcRenderer.invoke("save-file", props.src).then((result) => {});
+function saveVideo(event) {
+  window.ipcRenderer
+    .invoke("save-file", props.videoPath)
+    .then((res) => {
+      emit("showSnackbar", "success", "Saved!");
+    })
+    .catch((err) => {
+      emit("showSnackbar", "error", err);
+    });
+}
+
+function uploadVideo(event) {
+  isLoading.value = true;
+  window.ipcRenderer
+    .invoke("upload-video", props.videoPath, props.coverPath, caption.value)
+    .then((res) => {
+      emit("showSnackbar", "success", "Uploaded!");
+    })
+    .catch((err) => {
+      emit("showSnackbar", "error", err);
+    })
+    .finally(() => {
+      isLoading.value = false;
+    });
 }
 </script>

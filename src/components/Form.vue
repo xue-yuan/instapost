@@ -5,7 +5,7 @@
         <v-card>
           <v-card-text>
             <v-file-input
-              accept="image/*"
+              accept="image/jpeg"
               label="Select Image"
               prepend-icon="mdi-image"
               v-model="image"
@@ -141,7 +141,7 @@ let oldResult = ref("");
 
 const audioPlayer = ref();
 const form = ref();
-const emit = defineEmits(["sendPath"]);
+const emit = defineEmits(["sendParams", "showSnackbar"]);
 const imageRules = ref([
   (value) => {
     return value.length > 0 ? true : "Image is required";
@@ -290,16 +290,20 @@ async function generate() {
 
     window.ipcRenderer
       .invoke(
-        "media-process",
+        "process-media",
         image.value.path,
         audio.value.path,
         audioRange.value[0] / 1000,
         audioRange.value[1] / 1000,
         oldResult.value,
       )
-      .then((result) => {
-        oldResult.value = result;
-        emit("sendPath", result);
+      .then((res) => {
+        oldResult.value = res;
+        emit("sendParams", res, image.value.path);
+        emit("showSnackbar", "success", "Generated!");
+      })
+      .catch((err) => {
+        emit("showSnackbar", "error", err);
       })
       .finally(() => {
         isLoading.value = false;

@@ -1,10 +1,15 @@
 const { app, BrowserWindow, ipcMain, dialog } = require("electron");
 const ffmpeg = require("fluent-ffmpeg");
+const igApi = require("instagram-private-api");
 
 const fs = require("fs");
 const path = require("path");
+const util = require("util");
 
 const utils = require("./utils");
+
+const ig = new igApi.IgApiClient();
+const readFileAsync = util.promisify(fs.readFile);
 const DATA_PATH = "/tmp/instapost";
 
 function createWindow() {
@@ -21,7 +26,7 @@ function createWindow() {
   });
 
   win.loadFile("dist/index.html");
-  // win.webContents.openDevTools();
+  win.webContents.openDevTools();
 
   ipcMain.handle("save-file", async (event, sourcePath) => {
     return dialog
@@ -62,10 +67,11 @@ app.whenReady().then(() => {
 
 app.on("window-all-closed", () => {
   app.quit();
+  // TODO: clean /tmp/instapost
 });
 
 ipcMain.handle(
-  "media-process",
+  "process-media",
   async (event, imagePath, audioPath, audioStart, audioEnd, oldFile) => {
     const outputAudioPath = path.join(`${DATA_PATH}/output.mp3`);
     const outputVideoPath = path.join(
@@ -109,4 +115,27 @@ ipcMain.handle(
 
 ipcMain.handle("remove-file", async (event, path) => {
   utils.removeFile(path);
+});
+
+ipcMain.handle("upload-video", async (event, videoPath, coverPath, caption) => {
+  async function login() {
+    // TODO: remove hardcoding
+    ig.state.generateDevice("username");
+    await ig.account.login("username", "password");
+  }
+
+  return (async () => {
+    await login();
+
+    const video = await readFileAsync(videoPath);
+    const cover = await readFileAsync(coverPath);
+
+    const result = await ig.publish.video({
+      video: video,
+      coverImage: cover,
+      caption,
+    });
+
+    return result.status;
+  })();
 });
