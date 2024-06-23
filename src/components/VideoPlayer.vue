@@ -27,15 +27,6 @@
               <v-btn
                 variant="tonal"
                 :disabled="props.videoPath && !isLoading ? false : true"
-                @click="unloadVideo"
-              >
-                Close
-              </v-btn>
-            </v-col>
-            <v-col cols="auto">
-              <v-btn
-                variant="tonal"
-                :disabled="props.videoPath && !isLoading ? false : true"
                 @click="saveVideo"
               >
                 <template v-if="!isSaved">Save</template>
@@ -72,25 +63,11 @@ let caption = ref("");
 let isSaved = ref(false);
 let isLoading = ref(false);
 
-function unloadVideo(event) {
-  window.ipcRenderer
-    .invoke("remove-file", props.videoPath)
-    .then((res) => {
-      video.value.pause();
-      video.value.load();
-      emit("removePath");
-      emit("showSnackbar", "success", "Closed!");
-    })
-    .catch((err) => {
-      emit("showSnackbar", "error", err);
-    });
-}
-
 function saveVideo(event) {
   window.ipcRenderer
-    .invoke("save-file", props.videoPath)
+    .invoke("video:save", props.videoPath)
     .then((res) => {
-      emit("showSnackbar", "success", "Saved!");
+      emit("showSnackbar", "success", `File saved successfully at ${res}`);
     })
     .catch((err) => {
       emit("showSnackbar", "error", err);
@@ -100,7 +77,7 @@ function saveVideo(event) {
 function uploadVideo(event) {
   isLoading.value = true;
   window.ipcRenderer
-    .invoke("upload-video", props.videoPath, props.coverPath, caption.value)
+    .invoke("video:upload", props.videoPath, props.coverPath, caption.value)
     .then((res) => {
       emit("showSnackbar", "success", "Uploaded!");
     })

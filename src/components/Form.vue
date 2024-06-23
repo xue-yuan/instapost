@@ -5,7 +5,7 @@
         <v-card>
           <v-card-text>
             <v-file-input
-              accept="image/jpeg"
+              accept="image/*"
               label="Select Image"
               prepend-icon="mdi-image"
               v-model="image"
@@ -75,7 +75,7 @@
             <v-row justify="center">
               <v-col cols="auto">
                 <div class="text-h6 text-primary font-weight-bold">
-                  {{ (audioRange[1] - audioRange[0]) / 1000 }}
+                  Duration: {{ (audioRange[1] - audioRange[0]) / 1000 }}s
                 </div>
               </v-col>
             </v-row>
@@ -126,7 +126,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount } from "vue";
+import { onBeforeUnmount, onMounted, ref } from "vue";
 
 let image = ref(null);
 let audio = ref(null);
@@ -137,7 +137,6 @@ let audioMax = ref(0);
 let audioIsPlaying = ref(false);
 let audioIsLoaded = ref(false);
 let isLoading = ref(false);
-let oldResult = ref("");
 
 const audioPlayer = ref();
 const form = ref();
@@ -295,11 +294,9 @@ async function generate() {
         audio.value.path,
         audioRange.value[0] / 1000,
         audioRange.value[1] / 1000,
-        oldResult.value,
       )
-      .then((res) => {
-        oldResult.value = res;
-        emit("sendParams", res, image.value.path);
+      .then(([videoPath, coverPath]) => {
+        emit("sendParams", videoPath, coverPath);
         emit("showSnackbar", "success", "Generated!");
       })
       .catch((err) => {

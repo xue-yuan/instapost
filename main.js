@@ -1,23 +1,21 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
-const ffmpeg = require("fluent-ffmpeg");
-const igApi = require("instagram-private-api");
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
+import { IgApiClient } from "instagram-private-api";
+import path from "path";
 
-const fs = require("fs");
-const path = require("path");
-const util = require("util");
+import config from "./config.js";
+import * as event from "./event.js";
+import * as utils from "./utils.js";
 
-const utils = require("./utils");
+const ig = new IgApiClient();
 
-const ig = new igApi.IgApiClient();
-const readFileAsync = util.promisify(fs.readFile);
-const DATA_PATH = "/tmp/instapost";
+let mainWin = null;
 
 function createWindow() {
-  const win = new BrowserWindow({
+  mainWin = new BrowserWindow({
     width: 1400,
     height: 800,
     webPreferences: {
-      preload: path.join(__dirname, "preload.js"),
+      preload: path.join(path.resolve(), "preload.js"),
       contextIsolation: true,
       enableRemoteModule: true,
       nodeIntegration: false,
@@ -25,37 +23,26 @@ function createWindow() {
     resizable: false,
   });
 
-  win.loadFile("dist/index.html");
-  win.webContents.openDevTools();
+  mainWin.loadFile("dist/index.html");
+  mainWin.webContents.openDevTools();
 
-  ipcMain.handle("save-file", async (event, sourcePath) => {
-    return dialog
-      .showSaveDialog(win, {
-        defaultPath: "~/Desktop/instapost.mp4",
-      })
-      .then((result) => {
-        if (!result.canceled) {
-          const destinationPath = result.filePath;
-          fs.copyFile(sourcePath, destinationPath, (err) => {
-            if (!err) {
-              return destinationPath;
-            }
-          });
-        }
-      })
-      .catch((err) => {
-        console.error("error:", err);
-      });
+  nativeTheme.on("updated", () => {
+    mainWin.webContents.send(
+      "theme-updated",
+      nativeTheme.shouldUseDarkColors ? "dark" : "light",
+    );
   });
 
-  fs.mkdir(DATA_PATH, { recursive: true }, (err) => {
-    if (err) {
-      console.error("error:", err);
-    }
+  mainWin.webContents.on("did-finish-load", () => {
+    mainWin.webContents.send(
+      "theme-updated",
+      nativeTheme.shouldUseDarkColors ? "dark" : "light",
+    );
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await utils.createFolder(config.tmpFolder);
   createWindow();
 
   app.on("activate", () => {
@@ -65,59 +52,31 @@ app.whenReady().then(() => {
   });
 });
 
-app.on("window-all-closed", () => {
+app.on("window-all-closed", async () => {
+  await utils.removeFolder(config.tmpFolder);
   app.quit();
-  // TODO: clean /tmp/instapost
 });
 
 ipcMain.handle(
   "process-media",
-  async (event, imagePath, audioPath, audioStart, audioEnd, oldFile) => {
-    const outputAudioPath = path.join(`${DATA_PATH}/output.mp3`);
-    const outputVideoPath = path.join(
-      `${DATA_PATH}/${utils.generateRandomString(10)}.mp4`,
-    );
-
-    if (oldFile) {
-      utils.removeFile(oldFile);
-    }
-
-    return new Promise((resolve, reject) => {
-      ffmpeg(audioPath)
-        .setStartTime(audioStart)
-        .setDuration(audioEnd - audioStart)
-        .output(outputAudioPath)
-        .on("end", () => {
-          ffmpeg()
-            .input(imagePath)
-            .loop(audioEnd - audioStart)
-            .input(outputAudioPath)
-            .videoCodec("libx264")
-            .outputOptions(["-pix_fmt yuv420p"])
-            .output(outputVideoPath)
-            .on("end", () => {
-              utils.removeFile(outputAudioPath);
-              resolve(outputVideoPath);
-            })
-            .on("error", (err) => {
-              utils.removeFile(outputAudioPath);
-              reject(err.message);
-            })
-            .run();
-        })
-        .on("error", () => {
-          reject(err.message);
-        })
-        .run();
-    });
+  async (_, imagePath, audioPath, audioStart, audioEnd) => {
+    return event.processVideo(imagePath, audioPath, audioStart, audioEnd);
   },
 );
 
-ipcMain.handle("remove-file", async (event, path) => {
-  utils.removeFile(path);
+ipcMain.handle("video:save", async (_, sourcePath) => {
+  return dialog
+    .showSaveDialog(mainWin, {
+      defaultPath: config.defaultSavedPath,
+    })
+    .then((res) => {
+      if (!res.canceled) {
+        return utils.copyFile(sourcePath, res.filePath);
+      }
+    });
 });
 
-ipcMain.handle("upload-video", async (event, videoPath, coverPath, caption) => {
+ipcMain.handle("video:upload", async (_, videoPath, coverPath, caption) => {
   async function login() {
     // TODO: remove hardcoding
     ig.state.generateDevice("username");
@@ -127,8 +86,8 @@ ipcMain.handle("upload-video", async (event, videoPath, coverPath, caption) => {
   return (async () => {
     await login();
 
-    const video = await readFileAsync(videoPath);
-    const cover = await readFileAsync(coverPath);
+    const video = await utils.readFile(videoPath);
+    const cover = await utils.readFile(coverPath);
 
     const result = await ig.publish.video({
       video: video,
@@ -139,3 +98,5 @@ ipcMain.handle("upload-video", async (event, videoPath, coverPath, caption) => {
     return result.status;
   })();
 });
+
+ipcMain.handle("user:login", async (_) => {});
